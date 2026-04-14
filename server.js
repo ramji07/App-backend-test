@@ -34,6 +34,13 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "API is running successfully 🚀"
+  });
+});
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
