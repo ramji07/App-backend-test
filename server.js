@@ -93,11 +93,10 @@ connectDB().then(() => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  mongoose.connection.close(() => {
-    console.log('MongoDB connection closed on app termination');
-    process.exit(0);
-  });
+process.on("SIGTERM", async () => {
+  await mongoose.connection.close();
+  console.log("MongoDB disconnected (SIGTERM)");
+  process.exit(0);
 });
 
 module.exports = app;
