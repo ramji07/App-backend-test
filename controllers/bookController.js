@@ -9,9 +9,7 @@ const { successResponse, errorResponse } = require('../utils/response');
 const getBooks = async (req, res) => {
   try {
     const cached = cache.get(CACHE_KEYS.BOOKS_LIST);
-    if (cached) {
-      return successResponse(res, cached, 'Books fetched from cache.');
-    }
+    if (cached) return successResponse(res, cached, 'Books fetched from cache.');
 
     const books = await BibleBook.find().sort({ order: 1 }).lean();
 
@@ -24,8 +22,7 @@ const getBooks = async (req, res) => {
       newTestament: { count: newTestament.length, books: newTestament },
     };
 
-    cache.set(CACHE_KEYS.BOOKS_LIST, responseData, 86400); // cache 24h
-
+    cache.set(CACHE_KEYS.BOOKS_LIST, responseData, 86400);
     return successResponse(res, responseData, 'Books fetched successfully.');
   } catch (error) {
     console.error('getBooks error:', error);
@@ -33,39 +30,36 @@ const getBooks = async (req, res) => {
   }
 };
 
-// @desc    Get chapters list for a book
+// @desc    Get chapters list for a specific book
 // @route   GET /api/books/:book/chapters
 // @access  Public
 const getChaptersByBook = async (req, res) => {
   try {
-    const { book } = req.params;
-    const decodedBook = decodeURIComponent(book);
+    const decodedBook = decodeURIComponent(req.params.book);
     const cacheKey = CACHE_KEYS.BOOK_CHAPTERS(decodedBook);
 
     const cached = cache.get(cacheKey);
-    if (cached) {
-      return successResponse(res, cached, 'Chapters fetched from cache.');
-    }
+    if (cached) return successResponse(res, cached, 'Chapters fetched from cache.');
 
     const bookDoc = await BibleBook.findOne({ name: decodedBook }).lean();
     if (!bookDoc) {
       return errorResponse(res, `Book "${decodedBook}" not found.`, 404);
     }
 
-    // Get verse counts per chapter
+    // Verse count per chapter via aggregation
     const chapterStats = await Verse.aggregate([
       { $match: { book: decodedBook } },
       { $group: { _id: '$chapter', verseCount: { $sum: 1 } } },
       { $sort: { _id: 1 } },
     ]);
 
-    const chapters = Array.from({ length: bookDoc.chapters }, (_, i) => {
-      const stat = chapterStats.find((s) => s._id === i + 1);
-      return {
-        chapter: i + 1,
-        verseCount: stat?.verseCount || 0,
-      };
-    });
+    const statMap = {};
+    chapterStats.forEach((s) => { statMap[s._id] = s.verseCount; });
+
+    const chapters = Array.from({ length: bookDoc.chapters }, (_, i) => ({
+      chapter: i + 1,
+      verseCount: statMap[i + 1] || 0,
+    }));
 
     const responseData = {
       book: decodedBook,
@@ -76,7 +70,6 @@ const getChaptersByBook = async (req, res) => {
     };
 
     cache.set(cacheKey, responseData, 86400);
-
     return successResponse(res, responseData, 'Chapters fetched successfully.');
   } catch (error) {
     console.error('getChaptersByBook error:', error);

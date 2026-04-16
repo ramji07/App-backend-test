@@ -9,41 +9,53 @@ const { successResponse, errorResponse, paginatedResponse } = require('../utils/
 const getDailyVerse = async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
-    const lang = req.query.lang || 'en';
     const cacheKey = CACHE_KEYS.DAILY_VERSE(today);
 
-    // Check cache
+    // Check cache first
     const cached = cache.get(cacheKey);
     if (cached) {
       return successResponse(res, cached, 'Daily verse fetched from cache.');
     }
 
-    let dailyVerse = await DailyVerse.findOne({ date: today }).populate('verse');
+    let verseObj = null;
+    let devotional = null;
+    let theme = null;
 
-    // If no daily verse scheduled for today, pick a random one
-    if (!dailyVerse) {
-      const count = await Verse.countDocuments();
-      const random = Math.floor(Math.random() * count);
-      const randomVerse = await Verse.findOne().skip(random);
-      dailyVerse = { date: today, verse: randomVerse };
+    // Try scheduled daily verse
+    const dailyDoc = await DailyVerse.findOne({ date: today }).populate('verse').lean();
+    if (dailyDoc && dailyDoc.verse) {
+      verseObj = dailyDoc.verse;
+      devotional = dailyDoc.devotional || null;
+      theme = dailyDoc.theme || null;
     }
 
-    const verseObj = dailyVerse.verse;
+    // Fallback: random verse using $sample (efficient at scale)
+    if (!verseObj) {
+      const [random] = await Verse.aggregate([{ $sample: { size: 1 } }]);
+      verseObj = random || null;
+    }
+
+    if (!verseObj) {
+      return errorResponse(res, 'No verses found in database. Please run the seed script.', 404);
+    }
+
     const responseData = {
+      _id: verseObj._id,
       date: today,
       reference: `${verseObj.book} ${verseObj.chapter}:${verseObj.verseNumber}`,
       book: verseObj.book,
       chapter: verseObj.chapter,
       verseNumber: verseObj.verseNumber,
-      text: verseObj.text,
+      text: {
+        en: verseObj.text?.en || '',
+        hi: verseObj.text?.hi || verseObj.text?.en || '',
+      },
       testament: verseObj.testament,
-      devotional: dailyVerse.devotional || null,
-      theme: dailyVerse.theme || null,
+      devotional,
+      theme,
     };
 
-    // Cache for 1 hour
     cache.set(cacheKey, responseData, 3600);
-
     return successResponse(res, responseData, 'Daily verse fetched successfully.');
   } catch (error) {
     console.error('getDailyVerse error:', error);
@@ -62,30 +74,32 @@ const getVersesByChapter = async (req, res) => {
       return errorResponse(res, 'Book and chapter are required query parameters.', 400);
     }
 
-    const pageNum = parseInt(page);
-    const limitNum = Math.min(parseInt(limit), 200);
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(parseInt(limit) || 50, 200);
     const skip = (pageNum - 1) * limitNum;
+    const chapterNum = parseInt(chapter);
 
     const cacheKey = CACHE_KEYS.CHAPTER_VERSES(book, chapter);
     const cached = cache.get(cacheKey);
 
-    let verses;
-    let total;
+    let verses, total;
 
     if (cached) {
       verses = cached.verses;
       total = cached.total;
     } else {
       [verses, total] = await Promise.all([
-        Verse.find({ book, chapter: parseInt(chapter) })
-          .sort({ verseNumber: 1 })
-          .lean(),
-        Verse.countDocuments({ book, chapter: parseInt(chapter) }),
+        Verse.find({ book, chapter: chapterNum }).sort({ verseNumber: 1 }).lean(),
+        Verse.countDocuments({ book, chapter: chapterNum }),
       ]);
+      // Normalize: ensure hi falls back to en when missing
+      verses = verses.map((v) => ({
+        ...v,
+        text: { en: v.text?.en || '', hi: v.text?.hi || v.text?.en || '' },
+      }));
       cache.set(cacheKey, { verses, total }, 86400);
     }
 
-    // Apply pagination on cached result
     const paginatedVerses = verses.slice(skip, skip + limitNum);
 
     return paginatedResponse(
@@ -118,25 +132,17 @@ const searchVerses = async (req, res) => {
       return errorResponse(res, 'Search query must be at least 2 characters.', 400);
     }
 
-    const pageNum = parseInt(page);
-    const limitNum = Math.min(parseInt(limit), 50);
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(parseInt(limit) || 20, 50);
     const skip = (pageNum - 1) * limitNum;
 
-    const searchField = `text.${['en', 'hi', 'fr', 'es', 'de'].includes(lang) ? lang : 'en'}`;
-    const filter = {
-      [searchField]: { $regex: q.trim(), $options: 'i' },
-    };
-
-    if (testament && ['old', 'new'].includes(testament)) {
-      filter.testament = testament;
-    }
+    const safeLang = ['en', 'hi'].includes(lang) ? lang : 'en';
+    const searchField = `text.${safeLang}`;
+    const filter = { [searchField]: { $regex: q.trim(), $options: 'i' } };
+    if (testament && ['old', 'new'].includes(testament)) filter.testament = testament;
 
     const [verses, total] = await Promise.all([
-      Verse.find(filter)
-        .select('book chapter verseNumber text testament')
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
+      Verse.find(filter).select('book chapter verseNumber text testament').skip(skip).limit(limitNum).lean(),
       Verse.countDocuments(filter),
     ]);
 
@@ -146,7 +152,7 @@ const searchVerses = async (req, res) => {
       book: v.book,
       chapter: v.chapter,
       verseNumber: v.verseNumber,
-      text: v.text,
+      text: { en: v.text?.en || '', hi: v.text?.hi || v.text?.en || '' },
       testament: v.testament,
     }));
 

@@ -1,17 +1,5 @@
 const mongoose = require('mongoose');
 
-const multilingualTextSchema = new mongoose.Schema(
-  {
-    en: { type: String, required: [true, 'English text is required'] },
-    hi: { type: String, default: '' },
-    fr: { type: String, default: '' },
-    es: { type: String, default: '' },
-    de: { type: String, default: '' },
-    pt: { type: String, default: '' },
-  },
-  { _id: false }
-);
-
 const verseSchema = new mongoose.Schema(
   {
     book: {
@@ -32,26 +20,26 @@ const verseSchema = new mongoose.Schema(
       min: [1, 'Verse number must be at least 1'],
     },
     text: {
-      type: multilingualTextSchema,
-      required: true,
+      en: { type: String, default: '' },
+      hi: { type: String, default: '' },
     },
     testament: {
       type: String,
       enum: ['old', 'new'],
-      required: true,
+      required: [true, 'Testament (old/new) is required'],
+      index: true,
     },
   },
-  {
-    timestamps: false,
-    toJSON: { virtuals: true },
-  }
+  { timestamps: false }
 );
 
-// ─── Compound Indexes ─────────────────────────────────────────────────────────
+// Unique compound index — prevents duplicate verses
 verseSchema.index({ book: 1, chapter: 1, verseNumber: 1 }, { unique: true });
-verseSchema.index({ 'text.en': 'text' });
 
-// ─── Virtual: reference string ────────────────────────────────────────────────
+// Full-text search on both languages
+verseSchema.index({ 'text.en': 'text', 'text.hi': 'text' });
+
+// Virtual: human-readable reference  e.g. "John 3:16"
 verseSchema.virtual('reference').get(function () {
   return `${this.book} ${this.chapter}:${this.verseNumber}`;
 });

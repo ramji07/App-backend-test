@@ -26,46 +26,30 @@ const userSchema = new mongoose.Schema(
     },
     language: {
       type: String,
-      required: [true, 'Language preference is required'],
-      enum: {
-        values: ['en', 'hi', 'fr', 'es', 'de', 'pt', 'zh', 'ar', 'ru', 'ja'],
-        message: 'Unsupported language code: {VALUE}',
-      },
+      enum: { values: ['en', 'hi'], message: 'Language must be en or hi' },
       default: 'en',
     },
     bookmarks: [
       {
         verseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Verse' },
-        book: String,
-        chapter: Number,
-        verseNumber: Number,
+        book:        { type: String },
+        chapter:     { type: Number },
+        verseNumber: { type: Number },
         text: {
-          en: String,
-          hi: String,
-          fr: String,
-          es: String,
-          de: String,
+          en: { type: String, default: '' },
+          hi: { type: String, default: '' },
         },
         addedAt: { type: Date, default: Date.now },
       },
     ],
-    pushToken: {
-      type: String,
-      default: null,
-    },
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-    lastLoginAt: {
-      type: Date,
-      default: null,
-    },
+    pushToken:  { type: String, default: null },
+    isActive:   { type: Boolean, default: true },
+    lastLoginAt:{ type: Date, default: null },
   },
   {
     timestamps: true,
     toJSON: {
-      transform: function (doc, ret) {
+      transform(doc, ret) {
         delete ret.password;
         delete ret.__v;
         return ret;
@@ -74,11 +58,10 @@ const userSchema = new mongoose.Schema(
   }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────────────
 userSchema.index({ email: 1 });
 userSchema.index({ createdAt: -1 });
 
-// ─── Pre-save Hook: Hash Password ─────────────────────────────────────────────
+// Hash password before save
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   const salt = await bcrypt.genSalt(12);
@@ -86,9 +69,9 @@ userSchema.pre('save', async function (next) {
   next();
 });
 
-// ─── Instance Method: Compare Password ───────────────────────────────────────
+// Compare plaintext password to hash
 userSchema.methods.comparePassword = async function (candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password);
+  return bcrypt.compare(candidatePassword, this.password);
 };
 
 module.exports = mongoose.model('User', userSchema);

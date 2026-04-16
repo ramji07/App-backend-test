@@ -9,23 +9,26 @@ const register = async (req, res) => {
   try {
     const { name, email, password, language } = req.body;
 
-    // Validate required fields
-    if (!name || !email || !password || !language) {
-      return errorResponse(res, 'Name, email, password, and language are all required.', 400);
+    if (!name || !email || !password) {
+      return errorResponse(res, 'Name, email, and password are required.', 400);
     }
-
     if (password.length < 8) {
       return errorResponse(res, 'Password must be at least 8 characters.', 400);
     }
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email: email.toLowerCase() });
-    if (existingUser) {
+    const safeLang = ['en', 'hi'].includes(language) ? language : 'en';
+
+    const existing = await User.findOne({ email: email.toLowerCase() });
+    if (existing) {
       return errorResponse(res, 'An account with this email already exists.', 409);
     }
 
-    // Create user
-    const user = await User.create({ name, email, password, language });
+    const user = await User.create({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+      language: safeLang,
+    });
 
     const token = generateToken(user._id);
 
@@ -34,10 +37,10 @@ const register = async (req, res) => {
       {
         token,
         user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          language: user.language,
+          id:        user._id,
+          name:      user.name,
+          email:     user.email,
+          language:  user.language,
           createdAt: user.createdAt,
         },
       },
@@ -68,18 +71,15 @@ const login = async (req, res) => {
       return errorResponse(res, 'Email and password are required.', 400);
     }
 
-    // Find user + include password for comparison
     const user = await User.findOne({ email: email.toLowerCase() }).select('+password');
 
     if (!user || !(await user.comparePassword(password))) {
       return errorResponse(res, 'Invalid email or password.', 401);
     }
-
     if (!user.isActive) {
       return errorResponse(res, 'Your account has been deactivated.', 403);
     }
 
-    // Update last login
     user.lastLoginAt = new Date();
     await user.save({ validateBeforeSave: false });
 
@@ -88,11 +88,12 @@ const login = async (req, res) => {
     return successResponse(res, {
       token,
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        language: user.language,
+        id:          user._id,
+        name:        user.name,
+        email:       user.email,
+        language:    user.language,
         lastLoginAt: user.lastLoginAt,
+        createdAt:   user.createdAt,
       },
     }, 'Login successful.');
   } catch (error) {
@@ -107,7 +108,7 @@ const login = async (req, res) => {
 const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select('-password');
-    return successResponse(res, { user }, 'Profile fetched successfully.');
+    return successResponse(res, { user }, 'Profile fetched.');
   } catch (error) {
     return errorResponse(res, 'Failed to fetch profile.', 500);
   }
@@ -121,19 +122,19 @@ const updateLanguage = async (req, res) => {
     const { language } = req.body;
     if (!language) return errorResponse(res, 'Language code is required.', 400);
 
+    const safeLang = ['en', 'hi'].includes(language) ? language : 'en';
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { language },
-      { new: true, runValidators: true }
+      { language: safeLang },
+      { new: true }
     );
-
-    return successResponse(res, { language: user.language }, 'Language updated successfully.');
+    return successResponse(res, { language: user.language }, 'Language updated.');
   } catch (error) {
     return errorResponse(res, 'Failed to update language.', 500);
   }
 };
 
-// @desc    Update push notification token
+// @desc    Update push token
 // @route   PUT /api/auth/push-token
 // @access  Private
 const updatePushToken = async (req, res) => {

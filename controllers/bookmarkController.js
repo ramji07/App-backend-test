@@ -1,5 +1,4 @@
 const User = require('../models/User');
-const Verse = require('../models/Verse');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // @desc    Add a bookmark
@@ -13,11 +12,10 @@ const addBookmark = async (req, res) => {
 
     const user = await User.findById(req.user._id);
 
-    // Check if already bookmarked
+    // Prevent duplicates
     const alreadyBookmarked = user.bookmarks.some(
-      (b) => b.verseId?.toString() === verseId
+      (b) => b.verseId?.toString() === verseId.toString()
     );
-
     if (alreadyBookmarked) {
       return errorResponse(res, 'Verse is already bookmarked.', 409);
     }
@@ -27,13 +25,21 @@ const addBookmark = async (req, res) => {
       book,
       chapter,
       verseNumber,
-      text,
+      text: {
+        en: text?.en || '',
+        hi: text?.hi || text?.en || '',
+      },
       addedAt: new Date(),
     });
 
     await user.save({ validateBeforeSave: false });
 
-    return successResponse(res, { bookmarks: user.bookmarks }, 'Verse bookmarked successfully.', 201);
+    return successResponse(
+      res,
+      { bookmarks: user.bookmarks },
+      'Verse bookmarked successfully.',
+      201
+    );
   } catch (error) {
     console.error('addBookmark error:', error);
     return errorResponse(res, 'Failed to add bookmark.', 500);
@@ -47,17 +53,23 @@ const getBookmarks = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    // Ensure user can only access their own bookmarks
+    // Only allow users to access their own bookmarks
     if (userId !== req.user._id.toString()) {
-      return errorResponse(res, 'Unauthorized access to bookmarks.', 403);
+      return errorResponse(res, 'Unauthorized.', 403);
     }
 
     const user = await User.findById(userId).select('bookmarks');
+    if (!user) return errorResponse(res, 'User not found.', 404);
+
     const sorted = [...user.bookmarks].sort(
       (a, b) => new Date(b.addedAt) - new Date(a.addedAt)
     );
 
-    return successResponse(res, { bookmarks: sorted, count: sorted.length }, 'Bookmarks fetched.');
+    return successResponse(
+      res,
+      { bookmarks: sorted, count: sorted.length },
+      'Bookmarks fetched.'
+    );
   } catch (error) {
     console.error('getBookmarks error:', error);
     return errorResponse(res, 'Failed to fetch bookmarks.', 500);
@@ -72,13 +84,13 @@ const removeBookmark = async (req, res) => {
     const { verseId } = req.params;
 
     const user = await User.findById(req.user._id);
-    const initialLength = user.bookmarks.length;
+    const before = user.bookmarks.length;
 
     user.bookmarks = user.bookmarks.filter(
-      (b) => b.verseId?.toString() !== verseId
+      (b) => b.verseId?.toString() !== verseId.toString()
     );
 
-    if (user.bookmarks.length === initialLength) {
+    if (user.bookmarks.length === before) {
       return errorResponse(res, 'Bookmark not found.', 404);
     }
 
